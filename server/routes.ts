@@ -1,15 +1,13 @@
 import { Router } from 'express';
-import { churnGuardDataService } from './churnguard-data-service';
+import { bigQueryDataService } from './services/bigquery-data';
 
 export const apiRouter = Router();
 
-// Single endpoint for all account data
+// Get account data for dashboard table
 apiRouter.get('/accounts', async (req, res) => {
   try {
-    const period = req.query.period as 'weekly' | 'monthly' || 'weekly';
-    const timeframe = req.query.timeframe as string || 'current';
-
-    const accounts = await churnGuardDataService.getAccounts(period, timeframe);
+    console.log('Fetching account data from BigQuery...');
+    const accounts = await bigQueryDataService.getAccountData();
     res.json(accounts);
   } catch (error) {
     console.error('Error fetching accounts:', error);
@@ -17,11 +15,12 @@ apiRouter.get('/accounts', async (req, res) => {
   }
 });
 
-// Account history endpoint
-apiRouter.get('/accounts/:id/history', async (req, res) => {
+// Get 12-week account history for modal (matching 2.0 endpoint structure)
+apiRouter.get('/bigquery/account-history/:accountId', async (req, res) => {
   try {
-    const { id } = req.params;
-    const history = await churnGuardDataService.getAccountHistory(id);
+    const { accountId } = req.params;
+    console.log(`Fetching 12-week history for account: ${accountId}`);
+    const history = await bigQueryDataService.getAccountHistory(accountId);
     res.json(history);
   } catch (error) {
     console.error('Error fetching account history:', error);
@@ -29,31 +28,38 @@ apiRouter.get('/accounts/:id/history', async (req, res) => {
   }
 });
 
-// Risk summary endpoint - FIXED THE ROUTE PATH
-apiRouter.get('/risk-summary', async (_req, res) => {
+// Get historical performance data for dashboard charts
+apiRouter.get('/historical-performance', async (_req, res) => {
   try {
-    const summary = await churnGuardDataService.getRiskSummary();
-    res.json(summary);
+    console.log('Fetching historical performance data...');
+    const data = await bigQueryDataService.getHistoricalPerformance();
+    res.json(data);
   } catch (error) {
-    console.error('Error fetching risk summary:', error);
-    res.status(500).json({ error: 'Failed to fetch risk summary' });
+    console.error('Error fetching historical performance:', error);
+    res.status(500).json({ error: 'Failed to fetch historical performance data' });
   }
 });
 
-// Analytics endpoint for professional dashboard components - FIXED SYNTAX
-apiRouter.get('/analytics/dashboard', async (_req, res) => {
+// Get monthly trends for risk level bar chart
+apiRouter.get('/monthly-trends', async (_req, res) => {
   try {
-    const riskSummary = await churnGuardDataService.getRiskSummary();
-
-    // Transform to DashboardAnalytics format
-    const analytics = {
-      ...riskSummary,
-      weeklyTrends: [] // TODO: Add weekly trends data
-    };
-
-    res.json(analytics);
+    console.log('Fetching monthly trends data...');
+    const data = await bigQueryDataService.getMonthlyTrends();
+    res.json(data);
   } catch (error) {
-    console.error('Error fetching dashboard analytics:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard analytics' });
+    console.error('Error fetching monthly trends:', error);
+    res.status(500).json({ error: 'Failed to fetch monthly trends data' });
+  }
+});
+
+// Test BigQuery connection
+apiRouter.get('/test-connection', async (_req, res) => {
+  try {
+    console.log('Testing BigQuery connection...');
+    const result = await bigQueryDataService.testConnection();
+    res.json(result);
+  } catch (error) {
+    console.error('Error testing connection:', error);
+    res.status(500).json({ error: 'Failed to test connection' });
   }
 });

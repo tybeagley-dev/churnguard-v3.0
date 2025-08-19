@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useQuery } from '@tanstack/react-query';
 
 interface HistoricalDataPoint {
   month: string;
@@ -18,21 +19,16 @@ interface MetricToggle {
 }
 
 const HistoricalPerformance = () => {
-  // Mock data matching 2.0's 12-month rolling pattern
-  const historicalData: HistoricalDataPoint[] = [
-    { month: 'Aug 2024', spendAdjusted: 3.5, totalAccounts: 800, totalRedemptions: 120, totalSubscribers: 1.2, totalTextsSent: 4.5 },
-    { month: 'Sep 2024', spendAdjusted: 3.7, totalAccounts: 850, totalRedemptions: 140, totalSubscribers: 1.25, totalTextsSent: 4.7 },
-    { month: 'Oct 2024', spendAdjusted: 4.1, totalAccounts: 900, totalRedemptions: 180, totalSubscribers: 1.3, totalTextsSent: 4.8 },
-    { month: 'Nov 2024', spendAdjusted: 4.3, totalAccounts: 950, totalRedemptions: 200, totalSubscribers: 1.35, totalTextsSent: 4.9 },
-    { month: 'Dec 2024', spendAdjusted: 4.5, totalAccounts: 980, totalRedemptions: 220, totalSubscribers: 1.4, totalTextsSent: 5.0 },
-    { month: 'Jan 2025', spendAdjusted: 4.7, totalAccounts: 1000, totalRedemptions: 240, totalSubscribers: 1.45, totalTextsSent: 5.1 },
-    { month: 'Feb 2025', spendAdjusted: 4.3, totalAccounts: 950, totalRedemptions: 210, totalSubscribers: 1.42, totalTextsSent: 4.9 },
-    { month: 'Mar 2025', spendAdjusted: 4.6, totalAccounts: 980, totalRedemptions: 250, totalSubscribers: 1.48, totalTextsSent: 5.0 },
-    { month: 'Apr 2025', spendAdjusted: 4.8, totalAccounts: 1020, totalRedemptions: 270, totalSubscribers: 1.5, totalTextsSent: 5.2 },
-    { month: 'May 2025', spendAdjusted: 5.0, totalAccounts: 1050, totalRedemptions: 280, totalSubscribers: 1.52, totalTextsSent: 5.3 },
-    { month: 'Jun 2025', spendAdjusted: 5.1, totalAccounts: 1080, totalRedemptions: 290, totalSubscribers: 1.55, totalTextsSent: 5.4 },
-    { month: 'Jul 2025', spendAdjusted: 5.3, totalAccounts: 1100, totalRedemptions: 300, totalSubscribers: 1.58, totalTextsSent: 5.5 }
-  ];
+  // Fetch real historical performance data
+  const { data: historicalData = [], isLoading, error } = useQuery({
+    queryKey: ['historical-performance'],
+    queryFn: () => 
+      fetch('/api/historical-performance')
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch historical performance');
+          return res.json();
+        }),
+  });
 
   const [metrics, setMetrics] = useState<MetricToggle[]>([
     { key: 'spendAdjusted', label: 'Spend Adjusted', color: '#8b5cf6', enabled: true },
@@ -91,6 +87,15 @@ const HistoricalPerformance = () => {
 
       {/* Chart Container */}
       <div className="h-96">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-gray-500">Loading historical data...</div>
+          </div>
+        ) : error ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-red-500">Failed to load historical data</div>
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={historicalData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
@@ -140,6 +145,7 @@ const HistoricalPerformance = () => {
             }
           </LineChart>
         </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

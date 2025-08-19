@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useQuery } from '@tanstack/react-query';
 
 interface MonthlyTrendsData {
   month: string;
@@ -12,15 +13,16 @@ interface MonthlyTrendsData {
 const MonthlyTrends = () => {
   const [activeView, setActiveView] = useState<'weekly' | 'monthly'>('weekly');
 
-  // Mock data matching 2.0's risk level breakdown pattern
-  const monthlyData: MonthlyTrendsData[] = [
-    { month: 'Feb 2024', highRisk: 15, mediumRisk: 85, lowRisk: 150, total: 250 },
-    { month: 'Mar 2025', highRisk: 25, mediumRisk: 120, lowRisk: 655, total: 800 },
-    { month: 'Apr 2025', highRisk: 30, mediumRisk: 125, lowRisk: 645, total: 800 },
-    { month: 'May 2025', highRisk: 28, mediumRisk: 118, lowRisk: 654, total: 800 },
-    { month: 'Jun 2025', highRisk: 32, mediumRisk: 128, lowRisk: 640, total: 800 },
-    { month: 'Jul 2025', highRisk: 35, mediumRisk: 135, lowRisk: 630, total: 800 }
-  ];
+  // Fetch real monthly trends data
+  const { data: monthlyData = [], isLoading, error } = useQuery({
+    queryKey: ['monthly-trends'],
+    queryFn: () => 
+      fetch('/api/monthly-trends')
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch monthly trends');
+          return res.json();
+        }),
+  });
 
   const formatTooltipValue = (value: number, name: string) => {
     const labels: { [key: string]: string } = {
@@ -66,6 +68,15 @@ const MonthlyTrends = () => {
 
       {/* Chart Container */}
       <div className="h-80">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-gray-500">Loading monthly trends...</div>
+          </div>
+        ) : error ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-red-500">Failed to load monthly trends</div>
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
@@ -118,6 +129,7 @@ const MonthlyTrends = () => {
             />
           </BarChart>
         </ResponsiveContainer>
+        )}
       </div>
 
       {/* Risk Level Legend */}
