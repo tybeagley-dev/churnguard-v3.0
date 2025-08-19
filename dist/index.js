@@ -295,7 +295,7 @@ var BigQueryDataService = class {
         FROM dbt_models.total_revenue_by_account_and_date
         WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
         GROUP BY 1, 2
-      ),
+      )
       -- Temporarily disable monthly_texts until we fix timestamp/account mapping
       -- monthly_texts AS (
       --   SELECT 
