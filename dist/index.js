@@ -225,23 +225,22 @@ var BigQueryDataService = class {
           ROUND(RAND() * 20 - 10) as texts_delta,
           ROUND(RAND() * 10 - 5) as redemptions_delta
           
-        FROM accounts.accounts a
-        LEFT JOIN accounts.users u ON u.id = a.csm_user_id
-        LEFT JOIN dbt_models.hubspot_companies h ON h.company_id = a.id
+        FROM dbt_models.accounts a
+        LEFT JOIN (SELECT 'Unassigned' as name) u ON TRUE
         LEFT JOIN (
-          -- Get current week aggregated data
+          -- Get current week aggregated revenue data
           SELECT 
             account_id,
-            SUM(spend_adj) as total_spend,
-            SUM(total_texts_delivered) as total_texts_delivered,
-            SUM(coupons_redeemed) as coupons_redeemed,
-            MAX(active_subs_cnt) as active_subs_cnt
-          FROM dbt_models.accounts 
-          WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+            SUM(total) as total_spend,
+            0 as total_texts_delivered,
+            0 as coupons_redeemed,
+            0 as active_subs_cnt
+          FROM dbt_models.total_revenue_by_account_and_date 
+          WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
           GROUP BY account_id
         ) w ON w.account_id = a.id
         
-        WHERE a.launched_at IS NOT NULL
+        WHERE a.launchedat IS NOT NULL
           AND a.status IN ('LAUNCHED', 'PAUSED')
         ORDER BY a.name
         LIMIT 100
@@ -258,16 +257,16 @@ var BigQueryDataService = class {
     }
     const query = `
       SELECT 
-        CONCAT(EXTRACT(YEAR FROM week_start_date), 'W', FORMAT('%02d', EXTRACT(WEEK FROM week_start_date))) as week_yr,
-        FORMAT_DATE('%Y-%m-%d', week_start_date) as week_label,
-        COALESCE(spend_adj, 0) as total_spend,
-        COALESCE(total_texts_delivered, 0) as total_texts_delivered,
-        COALESCE(coupons_redeemed, 0) as coupons_redeemed,
-        COALESCE(active_subs_cnt, 0) as active_subs_cnt
-      FROM dbt_models.accounts
+        CONCAT(EXTRACT(YEAR FROM date), 'W', FORMAT('%02d', EXTRACT(WEEK FROM date))) as week_yr,
+        FORMAT_DATE('%Y-%m-%d', date) as week_label,
+        COALESCE(total, 0) as total_spend,
+        0 as total_texts_delivered,
+        0 as coupons_redeemed,
+        0 as active_subs_cnt
+      FROM dbt_models.total_revenue_by_account_and_date
       WHERE account_id = @accountId
-        AND week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 7 DAY)
-      ORDER BY week_start_date DESC
+        AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 7 DAY)
+      ORDER BY date DESC
       LIMIT 12
     `;
     const options = {
@@ -284,15 +283,15 @@ var BigQueryDataService = class {
     const query = `
       WITH monthly_data AS (
         SELECT 
-          FORMAT_DATE('%Y-%m', DATE_TRUNC(week_start_date, MONTH)) as month,
-          FORMAT_DATE('%B %Y', DATE_TRUNC(week_start_date, MONTH)) as monthLabel,
-          SUM(spend_adj) as spendAdjusted,
+          FORMAT_DATE('%Y-%m', DATE_TRUNC(date, MONTH)) as month,
+          FORMAT_DATE('%B %Y', DATE_TRUNC(date, MONTH)) as monthLabel,
+          SUM(total) as spendAdjusted,
           COUNT(DISTINCT account_id) as totalAccounts,
-          SUM(coupons_redeemed) as totalRedemptions,
-          SUM(active_subs_cnt) / COUNT(DISTINCT account_id) as totalSubscribers,
-          SUM(total_texts_delivered) / 1000000 as totalTextsSent
-        FROM dbt_models.accounts
-        WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
+          0 as totalRedemptions,
+          0 as totalSubscribers,
+          0 as totalTextsSent
+        FROM dbt_models.total_revenue_by_account_and_date
+        WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
         GROUP BY 1, 2
       )
       SELECT 
@@ -301,8 +300,8 @@ var BigQueryDataService = class {
         ROUND(spendAdjusted / 1000000, 1) as spendAdjusted,
         totalAccounts,
         totalRedemptions,
-        ROUND(totalSubscribers / 1000000, 2) as totalSubscribers,
-        ROUND(totalTextsSent, 1) as totalTextsSent
+        totalSubscribers,
+        totalTextsSent
       FROM monthly_data
       ORDER BY month
       LIMIT 12
@@ -314,19 +313,18 @@ var BigQueryDataService = class {
     const query = `
       WITH monthly_risk AS (
         SELECT 
-          FORMAT_DATE('%B %Y', DATE_TRUNC(week_start_date, MONTH)) as month,
+          FORMAT_DATE('%B %Y', DATE_TRUNC(date, MONTH)) as month,
           account_id,
-          AVG(spend_adj) as avg_spend,
-          AVG(coupons_redeemed) as avg_redemptions,
+          AVG(total) as avg_spend,
           
           CASE 
-            WHEN AVG(spend_adj) < 100 AND AVG(coupons_redeemed) < 5 THEN 'highRisk'
-            WHEN AVG(spend_adj) < 200 OR AVG(coupons_redeemed) < 10 THEN 'mediumRisk'
+            WHEN AVG(total) < 100 THEN 'highRisk'
+            WHEN AVG(total) < 500 THEN 'mediumRisk'
             ELSE 'lowRisk'
           END as risk_category
           
-        FROM dbt_models.accounts
-        WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 * 30 DAY)
+        FROM dbt_models.total_revenue_by_account_and_date
+        WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 * 30 DAY)
         GROUP BY 1, 2
       )
       SELECT 
