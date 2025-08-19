@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { ChevronDown, ArrowUpDown, TrendingUp, TrendingDown } from 'lucide-react';
+import AccountDetailModal from './AccountDetailModal';
 
 interface AccountData {
   account_id: string;
@@ -30,6 +31,9 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
   const [sortField, setSortField] = useState<SortField>('account_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [selectedAccountName, setSelectedAccountName] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
   const itemsPerPage = 25;
 
   // Extract unique CSMs for filter dropdown
@@ -79,6 +83,18 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
       setSortField(field);
       setSortDirection('asc');
     }
+  };
+
+  const handleRowClick = (account: AccountData) => {
+    setSelectedAccountId(account.account_id);
+    setSelectedAccountName(account.account_name);
+    setModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setModalOpen(false);
+    setSelectedAccountId(null);
+    setSelectedAccountName('');
   };
 
   const formatDelta = (delta: number) => {
@@ -226,6 +242,7 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
                 {paginatedAccounts.map((account, index) => (
                   <tr
                     key={account.account_id}
+                    onClick={() => handleRowClick(account)}
                     className="border-b hover:bg-gray-50 transition-colors cursor-pointer"
                   >
                     <td className="py-3 px-4 font-medium text-gray-900">
@@ -306,6 +323,14 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
           )}
         </>
       )}
+
+      {/* Account Detail Modal */}
+      <AccountDetailModal
+        accountId={selectedAccountId}
+        accountName={selectedAccountName}
+        isOpen={modalOpen}
+        onClose={handleModalClose}
+      />
     </div>
   );
 };
