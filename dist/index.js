@@ -1,310 +1,448 @@
-var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-
-// server/churnguard-data-service.ts
-var churnguard_data_service_exports = {};
-__export(churnguard_data_service_exports, {
-  ChurnGuardDataService: () => ChurnGuardDataService,
-  churnGuardDataService: () => churnGuardDataService
-});
-import { BigQuery } from "@google-cloud/bigquery";
-var ChurnGuardCacheManager, ChurnGuardDataService, churnGuardDataService;
-var init_churnguard_data_service = __esm({
-  "server/churnguard-data-service.ts"() {
-    "use strict";
-    ChurnGuardCacheManager = class {
-      client;
-      constructor(client) {
-        this.client = client;
-      }
-      async ensureFreshCache() {
-        const lastUpdate = await this.getLastCacheUpdate();
-        const hoursOld = (Date.now() - lastUpdate) / (1e3 * 60 * 60);
-        if (hoursOld > 18 || isNaN(hoursOld)) {
-          console.log("\u{1F504} Cache refresh triggered - rebuilding weekly and monthly caches");
-          await Promise.all([
-            this.refreshWeeklyCache(),
-            this.refreshMonthlyCache()
-          ]);
-          console.log("\u2705 Cache refresh complete");
-        } else {
-          console.log(`\u{1F4CA} Cache fresh (${Math.round(hoursOld)} hours old)`);
-        }
-      }
-      async refreshWeeklyCache() {
-        const query = `
-      CREATE OR REPLACE TABLE \`accounts.weekly_metrics_cache\` AS
-      SELECT 
-        a.id as account_id,
-        a.name as account_name,
-        COALESCE(o.owner_name, 'Unassigned') as csm_owner,
-        a.launched_at,
-        100 as total_spend,
-        50 as total_texts_delivered,
-        10 as coupons_redeemed,
-        200 as active_subs_cnt,
-        80 as previous_week_spend,
-        8 as previous_week_redemptions,
-        CURRENT_TIMESTAMP() as cache_updated_at
-      FROM \`accounts.accounts\` a
-      LEFT JOIN \`dbt_models.owners\` o ON o.account_id = a.id
-      WHERE a.launched_at IS NOT NULL
-      ORDER BY a.name
-      LIMIT 10
-    `;
-        await this.executeQuery(query);
-      }
-      async refreshMonthlyCache() {
-        const query = `
-      CREATE OR REPLACE TABLE \`accounts.monthly_metrics_cache\` AS
-      SELECT 
-        a.id as account_id,
-        a.name as account_name,
-        COALESCE(o.owner_name, 'Unassigned') as csm_owner,
-        a.launched_at,
-        500 as total_spend,
-        250 as total_texts_delivered,
-        50 as coupons_redeemed,
-        800 as active_subs_cnt,
-        400 as previous_month_spend,
-        40 as previous_month_redemptions,
-        CURRENT_TIMESTAMP() as cache_updated_at
-      FROM \`accounts.accounts\` a
-      LEFT JOIN \`dbt_models.owners\` o ON o.account_id = a.id
-      WHERE a.launched_at IS NOT NULL
-      ORDER BY a.name
-      LIMIT 10
-    `;
-        await this.executeQuery(query);
-      }
-      async getLastCacheUpdate() {
-        try {
-          const query = `SELECT MAX(cache_updated_at) as last_update FROM \`accounts.weekly_metrics_cache\` LIMIT 1`;
-          const [rows] = await this.client.query(query);
-          return rows[0]?.last_update ? new Date(rows[0].last_update).getTime() : 0;
-        } catch {
-          return 0;
-        }
-      }
-      async executeQuery(query) {
-        const [job] = await this.client.createQueryJob({ query, location: "US" });
-        const [rows] = await job.getQueryResults();
-        return rows;
-      }
-    };
-    ChurnGuardDataService = class {
-      client;
-      cacheManager;
-      constructor() {
-        let credentials = void 0;
-        if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-          try {
-            credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-          } catch (error) {
-            console.error("Failed to parse BigQuery credentials:", error);
-            throw new Error("Invalid BigQuery credentials format");
-          }
-        }
-        this.client = new BigQuery({
-          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
-          credentials
-        });
-        this.cacheManager = new ChurnGuardCacheManager(this.client);
-      }
-      async getAccounts(period, _timeframe) {
-        await this.cacheManager.ensureFreshCache();
-        const cacheTable = period === "weekly" ? "accounts.weekly_metrics_cache" : "accounts.monthly_metrics_cache";
-        const previousSpendField = period === "weekly" ? "previous_week_spend" : "previous_month_spend";
-        const previousRedemptionsField = period === "weekly" ? "previous_week_redemptions" : "previous_month_redemptions";
-        const query = `
-      SELECT 
-        account_id,
-        account_name,
-        csm_owner,
-        launched_at,
-        total_spend,
-        total_texts_delivered,
-        coupons_redeemed,
-        active_subs_cnt,
-        ${previousSpendField},
-        ${previousRedemptionsField},
-        cache_updated_at
-      FROM \`${cacheTable}\`
-      ORDER BY account_name
-      LIMIT 50
-    `;
-        const rows = await this.executeQuery(query);
-        return rows.map((row) => this.transformAccountData(row, period));
-      }
-      async getAccountHistory(accountId) {
-        const query = `
-      SELECT 
-        'Week 1' as week_start,
-        100 as total_spend,
-        50 as total_texts_delivered,
-        5 as coupons_redeemed,
-        25 as active_subs_cnt
-      WHERE '${accountId}' IS NOT NULL
-      LIMIT 12
-    `;
-        return await this.executeQuery(query);
-      }
-      async getRiskSummary() {
-        const accounts = await this.getAccounts("monthly", "current");
-        const totalAccounts = accounts.length;
-        const highRiskCount = accounts.filter((a) => a.risk_level === "high").length;
-        const mediumRiskCount = accounts.filter((a) => a.risk_level === "medium").length;
-        const lowRiskCount = accounts.filter((a) => a.risk_level === "low").length;
-        const totalRevenue = accounts.reduce((sum, a) => sum + a.total_spend, 0);
-        const revenueAtRisk = accounts.filter((a) => a.risk_level === "high").reduce((sum, a) => sum + a.total_spend, 0);
-        return {
-          totalAccounts,
-          highRiskCount,
-          mediumRiskCount,
-          lowRiskCount,
-          totalRevenue,
-          revenueAtRisk
-        };
-      }
-      async executeQuery(query, params = {}) {
-        try {
-          const [job] = await this.client.createQueryJob({
-            query,
-            location: "US",
-            params
-          });
-          const [rows] = await job.getQueryResults();
-          return rows;
-        } catch (error) {
-          console.error("BigQuery error:", error);
-          throw new Error(`BigQuery execution failed: ${error.message}`);
-        }
-      }
-      transformAccountData(row, period) {
-        const previousSpend = period === "weekly" ? row.previous_week_spend : row.previous_month_spend;
-        const previousRedemptions = period === "weekly" ? row.previous_week_redemptions : row.previous_month_redemptions;
-        const spend_delta = row.total_spend - (previousSpend || 0);
-        const coupons_delta = row.coupons_redeemed - (previousRedemptions || 0);
-        const riskScore = this.calculateRiskScore(row, spend_delta, coupons_delta);
-        const riskLevel = this.getRiskLevel(riskScore);
-        return {
-          account_id: row.account_id,
-          account_name: row.account_name,
-          csm_owner: row.csm_owner,
-          total_spend: row.total_spend,
-          total_texts_delivered: row.total_texts_delivered,
-          coupons_redeemed: row.coupons_redeemed,
-          active_subs_cnt: row.active_subs_cnt,
-          spend_delta,
-          texts_delta: 0,
-          coupons_delta,
-          subs_delta: 0,
-          risk_level: riskLevel,
-          risk_score: riskScore,
-          launched_at: row.launched_at
-        };
-      }
-      calculateRiskScore(account, spend_delta, coupons_delta) {
-        let score = 0;
-        if (account.coupons_redeemed <= 3) score++;
-        if (account.active_subs_cnt < 300 && account.coupons_redeemed < 35) score++;
-        if (spend_delta < -100) score++;
-        if (coupons_delta < -5) score++;
-        return score;
-      }
-      getRiskLevel(score) {
-        if (score >= 3) return "high";
-        if (score >= 1) return "medium";
-        return "low";
-      }
-    };
-    churnGuardDataService = new ChurnGuardDataService();
-  }
-});
-
 // server/index.ts
 import express from "express";
 
 // server/api-routes.ts
-init_churnguard_data_service();
 import { Router } from "express";
+
+// server/services/bigquery-data.ts
+import { BigQuery } from "@google-cloud/bigquery";
+var BigQueryDataService = class {
+  client = null;
+  isDemo;
+  constructor() {
+    this.isDemo = process.env.DEMO_MODE === "true" || process.env.NODE_ENV === "development";
+    if (!this.isDemo) {
+      let credentials = void 0;
+      if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        try {
+          credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+        } catch (error) {
+          console.error("Failed to parse GOOGLE_APPLICATION_CREDENTIALS:", error);
+        }
+      } else if (process.env.GOOGLE_CLOUD_PRIVATE_KEY) {
+        credentials = {
+          type: "service_account",
+          project_id: process.env.GOOGLE_CLOUD_PROJECT_ID,
+          private_key_id: process.env.GOOGLE_CLOUD_PRIVATE_KEY_ID,
+          private_key: process.env.GOOGLE_CLOUD_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+          client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+          client_id: process.env.GOOGLE_CLOUD_CLIENT_ID,
+          auth_uri: "https://accounts.google.com/o/oauth2/auth",
+          token_uri: "https://oauth2.googleapis.com/token",
+          auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+          client_x509_cert_url: process.env.GOOGLE_CLOUD_CLIENT_X509_CERT_URL
+        };
+      }
+      try {
+        this.client = new BigQuery({
+          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || "data-warehouse-432614",
+          credentials
+        });
+        console.log("\u2705 BigQuery client initialized successfully");
+      } catch (error) {
+        console.error("\u274C Failed to initialize BigQuery client:", error);
+        console.log("\u{1F504} Falling back to demo mode");
+        this.isDemo = true;
+      }
+    } else {
+      console.log("\u{1F3AD} Running in demo mode - using mock data");
+    }
+  }
+  async executeQuery(query) {
+    if (this.isDemo || !this.client) {
+      console.log("\u{1F3AD} Demo mode: Returning mock data instead of executing query");
+      return this.getMockDataForQuery(query);
+    }
+    try {
+      console.log("Executing BigQuery query...");
+      const [job] = await this.client.createQueryJob({
+        query,
+        location: "US",
+        jobTimeoutMs: 3e4
+      });
+      const [rows] = await job.getQueryResults();
+      console.log(`Query completed successfully, returned ${rows.length} rows`);
+      return rows;
+    } catch (error) {
+      console.error("BigQuery error:", error);
+      throw new Error(`BigQuery execution failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  getMockDataForQuery(query) {
+    if (query.includes("account_metrics") || query.includes("accounts.accounts")) {
+      return this.getMockAccountData();
+    } else if (query.includes("historical") || query.includes("monthly_data")) {
+      return this.getMockHistoricalData();
+    } else if (query.includes("monthly_risk") || query.includes("trends")) {
+      return this.getMockTrendsData();
+    } else if (query.includes("account_weekly_rollup") && query.includes("accountId")) {
+      return this.getMockAccountHistory();
+    }
+    return [];
+  }
+  getMockAccountData() {
+    return [
+      {
+        account_id: "acc_001",
+        account_name: "Burger Palace Downtown",
+        csm_owner: "Sarah Chen",
+        status: "LAUNCHED",
+        total_spend: 24500,
+        spend_delta: 8,
+        total_texts_delivered: 15680,
+        texts_delta: 12,
+        coupons_redeemed: 1250,
+        redemptions_delta: -3,
+        active_subs_cnt: 2890,
+        risk_level: "low"
+      },
+      {
+        account_id: "acc_002",
+        account_name: "Pizza Corner Express",
+        csm_owner: "Mike Rodriguez",
+        status: "LAUNCHED",
+        total_spend: 18200,
+        spend_delta: -5,
+        total_texts_delivered: 12450,
+        texts_delta: 3,
+        coupons_redeemed: 890,
+        redemptions_delta: 16,
+        active_subs_cnt: 2156,
+        risk_level: "medium"
+      },
+      {
+        account_id: "acc_003",
+        account_name: "Taco Fiesta Chain",
+        csm_owner: "Jessica Park",
+        status: "PAUSED",
+        total_spend: 8900,
+        spend_delta: -22,
+        total_texts_delivered: 5230,
+        texts_delta: -19,
+        coupons_redeemed: 234,
+        redemptions_delta: -45,
+        active_subs_cnt: 1078,
+        risk_level: "high"
+      },
+      {
+        account_id: "acc_004",
+        account_name: "Healthy Bowls Co",
+        csm_owner: "David Kim",
+        status: "LAUNCHED",
+        total_spend: 31200,
+        spend_delta: 19,
+        total_texts_delivered: 22100,
+        texts_delta: 25,
+        coupons_redeemed: 1890,
+        redemptions_delta: 28,
+        active_subs_cnt: 4250,
+        risk_level: "low"
+      },
+      {
+        account_id: "acc_005",
+        account_name: "Coffee Bean Central",
+        csm_owner: "Lisa Wong",
+        status: "LAUNCHED",
+        total_spend: 14600,
+        spend_delta: 3,
+        total_texts_delivered: 9870,
+        texts_delta: -1,
+        coupons_redeemed: 567,
+        redemptions_delta: 8,
+        active_subs_cnt: 1845,
+        risk_level: "medium"
+      }
+    ];
+  }
+  getMockHistoricalData() {
+    return [
+      { month: "2024-01", monthLabel: "January 2024", spendAdjusted: 2.8, totalAccounts: 145, totalRedemptions: 89, totalSubscribers: 12.4, totalTextsSent: 45 },
+      { month: "2024-02", monthLabel: "February 2024", spendAdjusted: 3.1, totalAccounts: 152, totalRedemptions: 94, totalSubscribers: 13.1, totalTextsSent: 48 },
+      { month: "2024-03", monthLabel: "March 2024", spendAdjusted: 2.9, totalAccounts: 148, totalRedemptions: 87, totalSubscribers: 12.8, totalTextsSent: 44 },
+      { month: "2024-04", monthLabel: "April 2024", spendAdjusted: 3.4, totalAccounts: 159, totalRedemptions: 102, totalSubscribers: 14.2, totalTextsSent: 52 },
+      { month: "2024-05", monthLabel: "May 2024", spendAdjusted: 3.2, totalAccounts: 156, totalRedemptions: 98, totalSubscribers: 13.7, totalTextsSent: 49 },
+      { month: "2024-06", monthLabel: "June 2024", spendAdjusted: 3.6, totalAccounts: 163, totalRedemptions: 108, totalSubscribers: 15.1, totalTextsSent: 55 },
+      { month: "2024-07", monthLabel: "July 2024", spendAdjusted: 3.8, totalAccounts: 167, totalRedemptions: 112, totalSubscribers: 15.8, totalTextsSent: 58 },
+      { month: "2024-08", monthLabel: "August 2024", spendAdjusted: 3.5, totalAccounts: 161, totalRedemptions: 105, totalSubscribers: 14.9, totalTextsSent: 54 },
+      { month: "2024-09", monthLabel: "September 2024", spendAdjusted: 3.9, totalAccounts: 171, totalRedemptions: 118, totalSubscribers: 16.2, totalTextsSent: 61 },
+      { month: "2024-10", monthLabel: "October 2024", spendAdjusted: 4.1, totalAccounts: 175, totalRedemptions: 125, totalSubscribers: 17.1, totalTextsSent: 64 },
+      { month: "2024-11", monthLabel: "November 2024", spendAdjusted: 3.7, totalAccounts: 165, totalRedemptions: 115, totalSubscribers: 15.6, totalTextsSent: 57 },
+      { month: "2024-12", monthLabel: "December 2024", spendAdjusted: 4.3, totalAccounts: 182, totalRedemptions: 135, totalSubscribers: 18.4, totalTextsSent: 68 }
+    ];
+  }
+  getMockTrendsData() {
+    return [
+      { month: "January 2024", highRisk: 23, mediumRisk: 45, lowRisk: 77, total: 145 },
+      { month: "February 2024", highRisk: 19, mediumRisk: 48, lowRisk: 85, total: 152 },
+      { month: "March 2024", highRisk: 26, mediumRisk: 42, lowRisk: 80, total: 148 },
+      { month: "April 2024", highRisk: 21, mediumRisk: 52, lowRisk: 86, total: 159 },
+      { month: "May 2024", highRisk: 18, mediumRisk: 49, lowRisk: 89, total: 156 },
+      { month: "June 2024", highRisk: 24, mediumRisk: 55, lowRisk: 84, total: 163 }
+    ];
+  }
+  getMockAccountHistory() {
+    return [
+      { week_yr: "2024W32", week_label: "2024-08-05", total_spend: 2150, total_texts_delivered: 1890, coupons_redeemed: 145, active_subs_cnt: 2890 },
+      { week_yr: "2024W31", week_label: "2024-07-29", total_spend: 2080, total_texts_delivered: 1820, coupons_redeemed: 138, active_subs_cnt: 2875 },
+      { week_yr: "2024W30", week_label: "2024-07-22", total_spend: 2220, total_texts_delivered: 1950, coupons_redeemed: 152, active_subs_cnt: 2910 },
+      { week_yr: "2024W29", week_label: "2024-07-15", total_spend: 1980, total_texts_delivered: 1780, coupons_redeemed: 142, active_subs_cnt: 2860 },
+      { week_yr: "2024W28", week_label: "2024-07-08", total_spend: 2350, total_texts_delivered: 2100, coupons_redeemed: 168, active_subs_cnt: 2920 },
+      { week_yr: "2024W27", week_label: "2024-07-01", total_spend: 2190, total_texts_delivered: 1890, coupons_redeemed: 155, active_subs_cnt: 2895 },
+      { week_yr: "2024W26", week_label: "2024-06-24", total_spend: 2050, total_texts_delivered: 1750, coupons_redeemed: 128, active_subs_cnt: 2870 },
+      { week_yr: "2024W25", week_label: "2024-06-17", total_spend: 2280, total_texts_delivered: 2e3, coupons_redeemed: 160, active_subs_cnt: 2905 },
+      { week_yr: "2024W24", week_label: "2024-06-10", total_spend: 2120, total_texts_delivered: 1850, coupons_redeemed: 142, active_subs_cnt: 2880 },
+      { week_yr: "2024W23", week_label: "2024-06-03", total_spend: 2400, total_texts_delivered: 2150, coupons_redeemed: 175, active_subs_cnt: 2935 },
+      { week_yr: "2024W22", week_label: "2024-05-27", total_spend: 2180, total_texts_delivered: 1920, coupons_redeemed: 148, active_subs_cnt: 2890 },
+      { week_yr: "2024W21", week_label: "2024-05-20", total_spend: 2090, total_texts_delivered: 1800, coupons_redeemed: 135, active_subs_cnt: 2865 }
+    ];
+  }
+  // Get account data for dashboard table
+  async getAccountData() {
+    const query = `
+      WITH account_metrics AS (
+        SELECT 
+          a.id as account_id,
+          a.name as account_name,
+          a.status,
+          COALESCE(u.name, 'Unassigned') as csm_owner,
+          h.id as hubspot_id,
+          
+          -- Current week metrics
+          COALESCE(w.total_spend, 0) as total_spend,
+          COALESCE(w.total_texts_delivered, 0) as total_texts_delivered,
+          COALESCE(w.coupons_redeemed, 0) as coupons_redeemed,
+          COALESCE(w.active_subs_cnt, 0) as active_subs_cnt,
+          
+          -- Risk indicators
+          CASE 
+            WHEN w.total_spend < 100 AND w.coupons_redeemed < 5 THEN 'high'
+            WHEN w.total_spend < 200 OR w.coupons_redeemed < 10 THEN 'medium'
+            ELSE 'low'
+          END as risk_level,
+          
+          -- Mock delta values for now
+          ROUND(RAND() * 100 - 50) as spend_delta,
+          ROUND(RAND() * 20 - 10) as texts_delta,
+          ROUND(RAND() * 10 - 5) as redemptions_delta
+          
+        FROM accounts.accounts a
+        LEFT JOIN accounts.users u ON u.id = a.csm_user_id
+        LEFT JOIN dbt_models.hubspot_companies h ON h.company_id = a.id
+        LEFT JOIN (
+          -- Get current week aggregated data
+          SELECT 
+            account_id,
+            SUM(spend_adj) as total_spend,
+            SUM(total_texts_delivered) as total_texts_delivered,
+            SUM(coupons_redeemed) as coupons_redeemed,
+            MAX(active_subs_cnt) as active_subs_cnt
+          FROM dbt_models.account_weekly_rollup 
+          WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+          GROUP BY account_id
+        ) w ON w.account_id = a.id
+        
+        WHERE a.launched_at IS NOT NULL
+          AND a.status IN ('LAUNCHED', 'PAUSED')
+        ORDER BY a.name
+        LIMIT 100
+      )
+      SELECT * FROM account_metrics
+    `;
+    return this.executeQuery(query);
+  }
+  // Get 12-week historical data for account modal
+  async getAccountHistory(accountId) {
+    if (this.isDemo || !this.client) {
+      console.log(`\u{1F3AD} Demo mode: Returning mock account history for ${accountId}`);
+      return this.getMockAccountHistory();
+    }
+    const query = `
+      SELECT 
+        CONCAT(EXTRACT(YEAR FROM week_start_date), 'W', FORMAT('%02d', EXTRACT(WEEK FROM week_start_date))) as week_yr,
+        FORMAT_DATE('%Y-%m-%d', week_start_date) as week_label,
+        COALESCE(spend_adj, 0) as total_spend,
+        COALESCE(total_texts_delivered, 0) as total_texts_delivered,
+        COALESCE(coupons_redeemed, 0) as coupons_redeemed,
+        COALESCE(active_subs_cnt, 0) as active_subs_cnt
+      FROM dbt_models.account_weekly_rollup
+      WHERE account_id = @accountId
+        AND week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 7 DAY)
+      ORDER BY week_start_date DESC
+      LIMIT 12
+    `;
+    const options = {
+      query,
+      location: "US",
+      params: { accountId }
+    };
+    const [job] = await this.client.createQueryJob(options);
+    const [rows] = await job.getQueryResults();
+    return rows;
+  }
+  // Get historical performance data for dashboard charts
+  async getHistoricalPerformance() {
+    const query = `
+      WITH monthly_data AS (
+        SELECT 
+          FORMAT_DATE('%Y-%m', DATE_TRUNC(week_start_date, MONTH)) as month,
+          FORMAT_DATE('%B %Y', DATE_TRUNC(week_start_date, MONTH)) as monthLabel,
+          SUM(spend_adj) as spendAdjusted,
+          COUNT(DISTINCT account_id) as totalAccounts,
+          SUM(coupons_redeemed) as totalRedemptions,
+          SUM(active_subs_cnt) / COUNT(DISTINCT account_id) as totalSubscribers,
+          SUM(total_texts_delivered) / 1000000 as totalTextsSent
+        FROM dbt_models.account_weekly_rollup
+        WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
+        GROUP BY 1, 2
+      )
+      SELECT 
+        month,
+        monthLabel,
+        ROUND(spendAdjusted / 1000000, 1) as spendAdjusted,
+        totalAccounts,
+        totalRedemptions,
+        ROUND(totalSubscribers / 1000000, 2) as totalSubscribers,
+        ROUND(totalTextsSent, 1) as totalTextsSent
+      FROM monthly_data
+      ORDER BY month
+      LIMIT 12
+    `;
+    return this.executeQuery(query);
+  }
+  // Get monthly trends for risk level bar chart
+  async getMonthlyTrends() {
+    const query = `
+      WITH monthly_risk AS (
+        SELECT 
+          FORMAT_DATE('%B %Y', DATE_TRUNC(week_start_date, MONTH)) as month,
+          account_id,
+          AVG(spend_adj) as avg_spend,
+          AVG(coupons_redeemed) as avg_redemptions,
+          
+          CASE 
+            WHEN AVG(spend_adj) < 100 AND AVG(coupons_redeemed) < 5 THEN 'highRisk'
+            WHEN AVG(spend_adj) < 200 OR AVG(coupons_redeemed) < 10 THEN 'mediumRisk'
+            ELSE 'lowRisk'
+          END as risk_category
+          
+        FROM dbt_models.account_weekly_rollup
+        WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 * 30 DAY)
+        GROUP BY 1, 2
+      )
+      SELECT 
+        month,
+        SUM(CASE WHEN risk_category = 'highRisk' THEN 1 ELSE 0 END) as highRisk,
+        SUM(CASE WHEN risk_category = 'mediumRisk' THEN 1 ELSE 0 END) as mediumRisk,
+        SUM(CASE WHEN risk_category = 'lowRisk' THEN 1 ELSE 0 END) as lowRisk,
+        COUNT(*) as total
+      FROM monthly_risk
+      GROUP BY month
+      ORDER BY month
+      LIMIT 6
+    `;
+    return this.executeQuery(query);
+  }
+  // Test connection
+  async testConnection() {
+    if (this.isDemo || !this.client) {
+      return {
+        success: true,
+        message: "Demo mode: Connection test successful (using mock data)"
+      };
+    }
+    try {
+      const testQuery = `SELECT 'connection_test' as status, CURRENT_TIMESTAMP() as timestamp`;
+      const result = await this.executeQuery(testQuery);
+      return {
+        success: true,
+        message: `BigQuery connection successful. Test result: ${JSON.stringify(result[0])}`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `BigQuery connection failed: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
+  }
+};
+var bigQueryDataService = new BigQueryDataService();
+
+// server/api-routes.ts
 var apiRouter = Router();
 apiRouter.get("/accounts", async (req, res) => {
   try {
-    const period = req.query.period || "weekly";
-    const timeframe = req.query.timeframe || "current";
-    const accounts = await churnGuardDataService.getAccounts(period, timeframe);
+    console.log("Fetching account data from BigQuery...");
+    const accounts = await bigQueryDataService.getAccountData();
     res.json(accounts);
   } catch (error) {
     console.error("Error fetching accounts:", error);
     res.status(500).json({ error: "Failed to fetch accounts" });
   }
 });
-apiRouter.get("/accounts/:id/history", async (req, res) => {
+apiRouter.get("/bigquery/account-history/:accountId", async (req, res) => {
   try {
-    const { id } = req.params;
-    const history = await churnGuardDataService.getAccountHistory(id);
+    const { accountId } = req.params;
+    console.log(`Fetching 12-week history for account: ${accountId}`);
+    const history = await bigQueryDataService.getAccountHistory(accountId);
     res.json(history);
   } catch (error) {
     console.error("Error fetching account history:", error);
     res.status(500).json({ error: "Failed to fetch account history" });
   }
 });
-apiRouter.get("/ri", async (_req, res) => {
+apiRouter.get("/historical-performance", async (_req, res) => {
   try {
-    const summary = await churnGuardDataService.getRiskSummary();
-    res.json(summary);
+    console.log("Fetching historical performance data...");
+    const data = await bigQueryDataService.getHistoricalPerformance();
+    res.json(data);
   } catch (error) {
-    console.error("Error fetching risk summary:", error);
-    res.status(500).json({ error: "Failed to fetch risk summary" });
+    console.error("Error fetching historical performance:", error);
+    res.status(500).json({ error: "Failed to fetch historical performance data" });
   }
 });
-apiRouter.get("/debug/cache-tables", async (_req, res) => {
+apiRouter.get("/monthly-trends", async (_req, res) => {
   try {
-    const { churnGuardDataService: churnGuardDataService2 } = await Promise.resolve().then(() => (init_churnguard_data_service(), churnguard_data_service_exports));
-    const query = `
-      SELECT table_catalog, table_schema, table_name 
-      FROM \`data-warehouse-432614.INFORMATION_SCHEMA.TABLES\`
-      WHERE table_name LIKE '%cache%'
-    `;
-    const [job] = await churnGuardDataService2["client"].createQueryJob({
-      query,
-      location: "US"
-    });
-    const [rows] = await job.getQueryResults();
-    res.json(rows);
+    console.log("Fetching monthly trends data...");
+    const data = await bigQueryDataService.getMonthlyTrends();
+    res.json(data);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error fetching monthly trends:", error);
+    res.status(500).json({ error: "Failed to fetch monthly trends data" });
+  }
+});
+apiRouter.get("/test-connection", async (_req, res) => {
+  try {
+    console.log("Testing BigQuery connection...");
+    const result = await bigQueryDataService.testConnection();
+    res.json(result);
+  } catch (error) {
+    console.error("Error testing connection:", error);
+    res.status(500).json({ error: "Failed to test connection" });
   }
 });
 
 // server/index.ts
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import dotenv from "dotenv";
+dotenv.config();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = dirname(__filename);
 var app = express();
-var PORT = 5001;
+var PORT = process.env.PORT || 8e3;
 app.use(express.json());
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`);
   next();
 });
 app.use("/api", apiRouter);
-app.use(express.static(join(__dirname, "../client/dist")));
+app.use(express.static(join(__dirname, "../dist/public")));
 app.get("/health", (_req, res) => {
   console.log("Health check called");
   res.json({ status: "ok", service: "ChurnGuard 3.0" });
 });
 app.get("*", (_req, res) => {
-  res.sendFile(join(__dirname, "../client/dist/index.html"));
+  res.sendFile(join(__dirname, "../dist/public/index.html"));
 });
 app.listen(PORT, () => {
   console.log(`\u{1F680} ChurnGuard 3.0 server running on port ${PORT}`);

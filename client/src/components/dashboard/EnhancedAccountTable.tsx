@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { ChevronDown, ArrowUpDown, TrendingUp, TrendingDown } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import AccountDetailModal from './AccountDetailModal';
 
 interface AccountData {
@@ -27,13 +28,15 @@ type SortDirection = 'asc' | 'desc';
 
 const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, loading }) => {
   const [timePeriod, setTimePeriod] = useState('Current WTD');
-  const [selectedCSM, setSelectedCSM] = useState('All CSMs');
+  const [selectedCSMs, setSelectedCSMs] = useState<string[]>(['All CSMs']);
+  const [csmDropdownOpen, setCsmDropdownOpen] = useState(false);
   const [sortField, setSortField] = useState<SortField>('account_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedAccountName, setSelectedAccountName] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const csmDropdownRef = useRef<HTMLDivElement>(null);
   const itemsPerPage = 25;
 
   // Extract unique CSMs for filter dropdown
@@ -42,11 +45,25 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
     return ['All CSMs', ...csms.sort()];
   }, [accounts]);
 
-  // Filter accounts based on selected CSM
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (csmDropdownRef.current && !csmDropdownRef.current.contains(event.target as Node)) {
+        setCsmDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Filter accounts based on selected CSMs
   const filteredAccounts = useMemo(() => {
-    if (selectedCSM === 'All CSMs') return accounts;
-    return accounts.filter(account => account.csm_owner === selectedCSM);
-  }, [accounts, selectedCSM]);
+    if (selectedCSMs.includes('All CSMs') || selectedCSMs.length === 0) return accounts;
+    return accounts.filter(account => selectedCSMs.includes(account.csm_owner));
+  }, [accounts, selectedCSMs]);
 
   // Sort accounts
   const sortedAccounts = useMemo(() => {
@@ -115,10 +132,70 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
     return <ArrowUpDown className="w-4 h-4 text-gray-400" />;
   };
 
+  // Calculate totals for summary ribbons
+  const totalSpend = filteredAccounts.reduce((sum, account) => sum + account.total_spend, 0);
+  const totalTexts = filteredAccounts.reduce((sum, account) => sum + account.total_texts_delivered, 0);
+  const totalRedemptions = filteredAccounts.reduce((sum, account) => sum + account.coupons_redeemed, 0);
+  const totalSubscribers = filteredAccounts.reduce((sum, account) => sum + account.active_subs_cnt, 0);
+
+  const formatCurrency = (amount: number) => 
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  
+  const formatNumber = (num: number) => 
+    new Intl.NumberFormat('en-US').format(num);
+
+  const handleCSMToggle = (csm: string) => {
+    if (csm === 'All CSMs') {
+      setSelectedCSMs(['All CSMs']);
+    } else {
+      const newSelected = selectedCSMs.includes('All CSMs')
+        ? [csm] // If 'All CSMs' was selected, replace with just this CSM
+        : selectedCSMs.includes(csm)
+        ? selectedCSMs.filter(c => c !== csm) // Remove if already selected
+        : [...selectedCSMs, csm]; // Add if not selected
+      
+      setSelectedCSMs(newSelected.length === 0 ? ['All CSMs'] : newSelected);
+    }
+  };
+
+  const getCSMDisplayText = () => {
+    if (selectedCSMs.includes('All CSMs')) {
+      return 'All CSMs';
+    }
+    if (selectedCSMs.length === 1) {
+      return selectedCSMs[0];
+    }
+    return `${selectedCSMs.length} CSMs selected`;
+  };
+
   return (
     <div className="bg-white border border-gray-300 rounded-lg p-6">
       <h2 className="text-xl font-semibold mb-6">Account Metrics Overview</h2>
       <p className="text-gray-600 text-sm mb-4">Key performance indicators for all restaurant accounts</p>
+
+      {/* Summary Ribbons - Matching 2.0 */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+          <div className="text-sm font-medium text-purple-700 mb-1">Total Spend</div>
+          <div className="text-sm text-purple-600">Current Week</div>
+          <div className="text-xl font-bold text-purple-900 mt-1">{formatCurrency(totalSpend)}</div>
+        </div>
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+          <div className="text-sm font-medium text-orange-700 mb-1">Total Texts</div>
+          <div className="text-sm text-orange-600">Current Week</div>
+          <div className="text-xl font-bold text-orange-900 mt-1">{formatNumber(totalTexts)}</div>
+        </div>
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="text-sm font-medium text-green-700 mb-1">Total Redemptions</div>
+          <div className="text-sm text-green-600">Current Week</div>
+          <div className="text-xl font-bold text-green-900 mt-1">{formatNumber(totalRedemptions)}</div>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="text-sm font-medium text-blue-700 mb-1">Total Subscribers</div>
+          <div className="text-sm text-blue-600">Current Week</div>
+          <div className="text-xl font-bold text-blue-900 mt-1">{formatNumber(totalSubscribers)}</div>
+        </div>
+      </div>
 
       {/* Filter Controls */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -135,24 +212,42 @@ const EnhancedAccountTable: React.FC<EnhancedAccountTableProps> = ({ accounts, l
               <option>Current Month</option>
               <option>Previous Month</option>
             </select>
-            <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-gray-500 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
           </div>
           <p className="text-xs text-gray-500 mt-1">Showing data for: Current Week to Date (through previous complete day)</p>
         </div>
 
-        <div className="flex flex-col">
+        <div className="flex flex-col" ref={csmDropdownRef}>
           <label className="text-sm font-medium text-gray-700 mb-1">CSM:</label>
           <div className="relative">
-            <select 
-              value={selectedCSM}
-              onChange={(e) => setSelectedCSM(e.target.value)}
-              className="appearance-none bg-white border border-gray-300 rounded px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <button
+              onClick={() => setCsmDropdownOpen(!csmDropdownOpen)}
+              className="appearance-none bg-white border border-gray-300 rounded px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[36px] cursor-pointer w-full text-left flex items-center justify-between"
             >
-              {uniqueCSMs.map((csm) => (
-                <option key={csm} value={csm}>{csm}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-gray-500 pointer-events-none" />
+              <span className="text-gray-700">{getCSMDisplayText()}</span>
+              <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${
+                csmDropdownOpen ? 'transform rotate-180' : ''
+              }`} />
+            </button>
+            
+            {csmDropdownOpen && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 max-h-60 overflow-y-auto">
+                {uniqueCSMs.map((csm) => (
+                  <div
+                    key={csm}
+                    className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer"
+                    onClick={() => handleCSMToggle(csm)}
+                  >
+                    <Checkbox
+                      checked={selectedCSMs.includes(csm)}
+                      onCheckedChange={() => handleCSMToggle(csm)}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">{csm}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <p className="text-xs text-gray-500 mt-1">
             Showing {paginatedAccounts.length} of {sortedAccounts.length} accounts ({filteredAccounts.length} total)

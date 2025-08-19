@@ -2,6 +2,10 @@ import express from "express";
 import { apiRouter } from "./api-routes";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import dotenv from "dotenv";
+
+// Load environment variables
+dotenv.config();
 
 // ES module __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);

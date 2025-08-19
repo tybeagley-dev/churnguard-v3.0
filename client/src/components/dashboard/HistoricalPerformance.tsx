@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useQuery } from '@tanstack/react-query';
 
 interface HistoricalDataPoint {
@@ -19,23 +20,30 @@ interface MetricToggle {
 }
 
 const HistoricalPerformance = () => {
-  // Fetch real historical performance data
-  const { data: historicalData = [], isLoading, error } = useQuery({
-    queryKey: ['historical-performance'],
-    queryFn: () => 
-      fetch('/api/historical-performance')
-        .then(res => {
-          if (!res.ok) throw new Error('Failed to fetch historical performance');
-          return res.json();
-        }),
-  });
+  // Demo mode: Use mock data instead of API calls to prevent reload loops
+  const historicalData = [
+    { month: 'Jan 2024', spendAdjusted: 2.8, totalAccounts: 145, totalRedemptions: 89, totalSubscribers: 12.4, totalTextsSent: 45 },
+    { month: 'Feb 2024', spendAdjusted: 3.1, totalAccounts: 152, totalRedemptions: 94, totalSubscribers: 13.1, totalTextsSent: 48 },
+    { month: 'Mar 2024', spendAdjusted: 2.9, totalAccounts: 148, totalRedemptions: 87, totalSubscribers: 12.8, totalTextsSent: 44 },
+    { month: 'Apr 2024', spendAdjusted: 3.4, totalAccounts: 159, totalRedemptions: 102, totalSubscribers: 14.2, totalTextsSent: 52 },
+    { month: 'May 2024', spendAdjusted: 3.2, totalAccounts: 156, totalRedemptions: 98, totalSubscribers: 13.7, totalTextsSent: 49 },
+    { month: 'Jun 2024', spendAdjusted: 3.6, totalAccounts: 163, totalRedemptions: 108, totalSubscribers: 15.1, totalTextsSent: 55 },
+    { month: 'Jul 2024', spendAdjusted: 3.8, totalAccounts: 167, totalRedemptions: 112, totalSubscribers: 15.8, totalTextsSent: 58 },
+    { month: 'Aug 2024', spendAdjusted: 3.5, totalAccounts: 161, totalRedemptions: 105, totalSubscribers: 14.9, totalTextsSent: 54 },
+    { month: 'Sep 2024', spendAdjusted: 3.9, totalAccounts: 171, totalRedemptions: 118, totalSubscribers: 16.2, totalTextsSent: 61 },
+    { month: 'Oct 2024', spendAdjusted: 4.1, totalAccounts: 175, totalRedemptions: 125, totalSubscribers: 17.1, totalTextsSent: 64 },
+    { month: 'Nov 2024', spendAdjusted: 3.7, totalAccounts: 165, totalRedemptions: 115, totalSubscribers: 15.6, totalTextsSent: 57 },
+    { month: 'Dec 2024', spendAdjusted: 4.3, totalAccounts: 182, totalRedemptions: 135, totalSubscribers: 18.4, totalTextsSent: 68 }
+  ];
+  const isLoading = false;
+  const error = null;
 
   const [metrics, setMetrics] = useState<MetricToggle[]>([
     { key: 'spendAdjusted', label: 'Spend Adjusted', color: '#8b5cf6', enabled: true },
-    { key: 'totalAccounts', label: 'Total Accounts', color: '#f59e0b', enabled: true },
-    { key: 'totalRedemptions', label: 'Total Redemptions', color: '#10b981', enabled: true },
-    { key: 'totalSubscribers', label: 'Total Subscribers', color: '#3b82f6', enabled: true },
-    { key: 'totalTextsSent', label: 'Total Texts Sent', color: '#ef4444', enabled: true }
+    { key: 'totalAccounts', label: 'Total Accounts', color: '#f97316', enabled: true },
+    { key: 'totalRedemptions', label: 'Total Redemptions', color: '#16a34a', enabled: true },
+    { key: 'totalSubscribers', label: 'Total Subscribers', color: '#2563eb', enabled: true },
+    { key: 'totalTextsSent', label: 'Total Texts Sent', color: '#dc2626', enabled: true }
   ]);
 
   const toggleMetric = (key: keyof Omit<HistoricalDataPoint, 'month'>) => {
@@ -57,30 +65,29 @@ const HistoricalPerformance = () => {
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">Historical Performance</h2>
-        <p className="text-gray-600 text-sm">Performance Tracking Across Primary Metrics | Rolling 12 months</p>
+        <h2 className="text-xl font-semibold mb-6">Historical Performance</h2>
+        <p className="text-gray-600 text-sm">Performance Tracking Across Primary Metrics | Rolling 12 months (Demo Mode)</p>
       </div>
 
-      {/* Metric Selection Toggles */}
+      {/* Metric Selection Toggles - Matching 2.0 checkboxes */}
       <div className="mb-6">
-        <p className="text-sm font-medium text-gray-700 mb-3">Select Metrics to Display:</p>
-        <div className="flex flex-wrap gap-3">
+        <p className="text-sm font-semibold text-gray-700 mb-3">Select Metrics to Display:</p>
+        <div className="flex flex-wrap gap-4">
           {metrics.map((metric) => (
-            <button
-              key={metric.key}
-              onClick={() => toggleMetric(metric.key)}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                metric.enabled
-                  ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                  : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
-              }`}
-            >
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: metric.enabled ? metric.color : '#d1d5db' }}
+            <div key={metric.key} className="flex items-center space-x-2">
+              <Checkbox
+                id={metric.key}
+                checked={metric.enabled}
+                onCheckedChange={() => toggleMetric(metric.key)}
               />
-              <span>{metric.label}</span>
-            </button>
+              <label
+                htmlFor={metric.key}
+                className="text-sm font-medium cursor-pointer"
+                style={{ color: metric.color }}
+              >
+                {metric.label}
+              </label>
+            </div>
           ))}
         </div>
       </div>
@@ -128,7 +135,7 @@ const HistoricalPerformance = () => {
               formatter={(value) => metrics.find(m => m.key === value)?.label || value}
             />
             
-            {/* Dynamic Lines based on enabled metrics */}
+            {/* Dynamic Lines based on enabled metrics - Matching 2.0 styling */}
             {metrics
               .filter(metric => metric.enabled)
               .map((metric) => (
@@ -137,8 +144,8 @@ const HistoricalPerformance = () => {
                   type="monotone"
                   dataKey={metric.key}
                   stroke={metric.color}
-                  strokeWidth={2}
-                  dot={{ r: 4, fill: metric.color }}
+                  strokeWidth={3}
+                  dot={{ fill: metric.color, strokeWidth: 2, r: 4 }}
                   activeDot={{ r: 6, fill: metric.color }}
                 />
               ))
