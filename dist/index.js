@@ -209,9 +209,9 @@ var BigQueryDataService = class {
           
           -- Current week metrics
           COALESCE(w.total_spend, 0) as total_spend,
-          0 as total_texts_delivered, -- Temporarily disabled until we fix column mapping
-          0 as coupons_redeemed, -- Not available in current schema
-          0 as active_subs_cnt, -- Not available in current schema
+          COALESCE(t.total_texts_delivered, 0) as total_texts_delivered,
+          COALESCE(c.coupons_redeemed, 0) as coupons_redeemed,
+          COALESCE(s.active_subs_cnt, 0) as active_subs_cnt,
           
           -- Risk indicators
           CASE 
@@ -236,14 +236,38 @@ var BigQueryDataService = class {
           WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
           GROUP BY account_id
         ) w ON w.account_id = a.id
-        -- Temporarily disable text data join until we identify the correct account linking column
-        -- LEFT JOIN (
-        --   SELECT account_id, COUNT(*) as total_texts_delivered
-        --   FROM dbt_models.all_texts 
-        --   WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-        --     AND is_billable = true
-        --   GROUP BY account_id
-        -- ) t ON t.account_id = a.id
+        LEFT JOIN (
+          -- Get current week text data via units table
+          SELECT 
+            u.account_id,
+            COUNT(DISTINCT t.id) as total_texts_delivered
+          FROM public.texts t
+          JOIN units.units u ON u.id = t.unit_id
+          WHERE t.direction = 'OUTGOING' AND t.status = 'DELIVERED'
+            AND DATE(t.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+          GROUP BY u.account_id
+        ) t ON t.account_id = a.id
+        LEFT JOIN (
+          -- Get current week coupon redemptions
+          SELECT 
+            u.account_id,
+            COUNT(DISTINCT c.id) as coupons_redeemed
+          FROM promos.coupons c
+          JOIN units.units u ON u.id = c.unit_id
+          WHERE c.is_redeemed = TRUE
+            AND DATE(c.redeemed_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+          GROUP BY u.account_id
+        ) c ON c.account_id = a.id
+        LEFT JOIN (
+          -- Get current active subscriber count
+          SELECT 
+            u.account_id,
+            COUNT(DISTINCT s.id) as active_subs_cnt
+          FROM public.subscriptions s
+          JOIN units.units u ON s.channel_id = u.id
+          WHERE s.deactivated_at IS NULL OR DATE(s.deactivated_at) >= CURRENT_DATE()
+          GROUP BY u.account_id
+        ) s ON s.account_id = a.id
         
         WHERE a.launchedat IS NOT NULL
           AND a.status IN ('LAUNCHED', 'PAUSED')
@@ -295,26 +319,38 @@ var BigQueryDataService = class {
         FROM dbt_models.total_revenue_by_account_and_date
         WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
         GROUP BY 1, 2
+      ),
+      monthly_texts AS (
+        SELECT 
+          FORMAT_DATE('%Y-%m', DATE_TRUNC(DATE(t.created_at), MONTH)) as month,
+          COUNT(DISTINCT t.id) as totalTextsSent
+        FROM public.texts t
+        JOIN units.units u ON u.id = t.unit_id
+        WHERE t.direction = 'OUTGOING' AND t.status = 'DELIVERED'
+          AND DATE(t.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
+        GROUP BY 1
+      ),
+      monthly_redemptions AS (
+        SELECT 
+          FORMAT_DATE('%Y-%m', DATE_TRUNC(DATE(c.redeemed_at), MONTH)) as month,
+          COUNT(DISTINCT c.id) as totalRedemptions
+        FROM promos.coupons c
+        JOIN units.units u ON u.id = c.unit_id
+        WHERE c.is_redeemed = TRUE
+          AND DATE(c.redeemed_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
+        GROUP BY 1
       )
-      -- Temporarily disable monthly_texts until we fix timestamp/account mapping
-      -- monthly_texts AS (
-      --   SELECT 
-      --     FORMAT_DATE('%Y-%m', DATE_TRUNC(DATE(created_at), MONTH)) as month,
-      --     COUNT(*) as totalTextsSent
-      --   FROM dbt_models.all_texts
-      --   WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
-      --     AND is_billable = true
-      --   GROUP BY 1
-      -- )
       SELECT 
         r.month,
         r.monthLabel,
         ROUND(r.spendAdjusted / 1000000, 1) as spendAdjusted,
         r.totalAccounts,
-        0 as totalRedemptions,
-        0 as totalSubscribers,
-        0 as totalTextsSent -- Temporarily disabled
+        COALESCE(rd.totalRedemptions, 0) as totalRedemptions,
+        0 as totalSubscribers, -- Subscriber historical data requires more complex query
+        COALESCE(t.totalTextsSent, 0) as totalTextsSent
       FROM monthly_revenue r
+      LEFT JOIN monthly_texts t ON r.month = t.month
+      LEFT JOIN monthly_redemptions rd ON r.month = rd.month
       ORDER BY r.month
       LIMIT 12
     `;
