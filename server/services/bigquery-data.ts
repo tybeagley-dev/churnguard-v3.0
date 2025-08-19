@@ -215,7 +215,7 @@ export class BigQueryDataService {
           a.name as account_name,
           a.status,
           COALESCE(u.name, 'Unassigned') as csm_owner,
-          h.id as hubspot_id,
+          a.hubspotid as hubspot_id,
           
           -- Current week metrics
           COALESCE(w.total_spend, 0) as total_spend,
