@@ -246,7 +246,7 @@ export class BigQueryDataService {
             SUM(total_texts_delivered) as total_texts_delivered,
             SUM(coupons_redeemed) as coupons_redeemed,
             MAX(active_subs_cnt) as active_subs_cnt
-          FROM dbt_models.account_weekly_rollup 
+          FROM dbt_models.accounts 
           WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
           GROUP BY account_id
         ) w ON w.account_id = a.id
@@ -277,7 +277,7 @@ export class BigQueryDataService {
         COALESCE(total_texts_delivered, 0) as total_texts_delivered,
         COALESCE(coupons_redeemed, 0) as coupons_redeemed,
         COALESCE(active_subs_cnt, 0) as active_subs_cnt
-      FROM dbt_models.account_weekly_rollup
+      FROM dbt_models.accounts
       WHERE account_id = @accountId
         AND week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 7 DAY)
       ORDER BY week_start_date DESC
@@ -307,7 +307,7 @@ export class BigQueryDataService {
           SUM(coupons_redeemed) as totalRedemptions,
           SUM(active_subs_cnt) / COUNT(DISTINCT account_id) as totalSubscribers,
           SUM(total_texts_delivered) / 1000000 as totalTextsSent
-        FROM dbt_models.account_weekly_rollup
+        FROM dbt_models.accounts
         WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
         GROUP BY 1, 2
       )
@@ -343,7 +343,7 @@ export class BigQueryDataService {
             ELSE 'lowRisk'
           END as risk_category
           
-        FROM dbt_models.account_weekly_rollup
+        FROM dbt_models.accounts
         WHERE week_start_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 * 30 DAY)
         GROUP BY 1, 2
       )
