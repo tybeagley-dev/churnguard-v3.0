@@ -209,7 +209,7 @@ var BigQueryDataService = class {
           
           -- Current week metrics
           COALESCE(w.total_spend, 0) as total_spend,
-          COALESCE(t.total_texts_delivered, 0) as total_texts_delivered,
+          0 as total_texts_delivered, -- Temporarily disabled until we fix column mapping
           0 as coupons_redeemed, -- Not available in current schema
           0 as active_subs_cnt, -- Not available in current schema
           
@@ -236,16 +236,14 @@ var BigQueryDataService = class {
           WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
           GROUP BY account_id
         ) w ON w.account_id = a.id
-        LEFT JOIN (
-          -- Get current week text data
-          SELECT 
-            account_id,
-            COUNT(*) as total_texts_delivered
-          FROM dbt_models.all_texts 
-          WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-            AND is_billable = true
-          GROUP BY account_id
-        ) t ON t.account_id = a.id
+        -- Temporarily disable text data join until we identify the correct account linking column
+        -- LEFT JOIN (
+        --   SELECT account_id, COUNT(*) as total_texts_delivered
+        --   FROM dbt_models.all_texts 
+        --   WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+        --     AND is_billable = true
+        --   GROUP BY account_id
+        -- ) t ON t.account_id = a.id
         
         WHERE a.launchedat IS NOT NULL
           AND a.status IN ('LAUNCHED', 'PAUSED')
@@ -298,15 +296,16 @@ var BigQueryDataService = class {
         WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
         GROUP BY 1, 2
       ),
-      monthly_texts AS (
-        SELECT 
-          FORMAT_DATE('%Y-%m', DATE_TRUNC(created_at, MONTH)) as month,
-          COUNT(*) as totalTextsSent
-        FROM dbt_models.all_texts
-        WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
-          AND is_billable = true
-        GROUP BY 1
-      )
+      -- Temporarily disable monthly_texts until we fix timestamp/account mapping
+      -- monthly_texts AS (
+      --   SELECT 
+      --     FORMAT_DATE('%Y-%m', DATE_TRUNC(DATE(created_at), MONTH)) as month,
+      --     COUNT(*) as totalTextsSent
+      --   FROM dbt_models.all_texts
+      --   WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
+      --     AND is_billable = true
+      --   GROUP BY 1
+      -- )
       SELECT 
         r.month,
         r.monthLabel,
@@ -314,9 +313,8 @@ var BigQueryDataService = class {
         r.totalAccounts,
         0 as totalRedemptions,
         0 as totalSubscribers,
-        COALESCE(t.totalTextsSent / 1000000, 0) as totalTextsSent
+        0 as totalTextsSent -- Temporarily disabled
       FROM monthly_revenue r
-      LEFT JOIN monthly_texts t ON r.month = t.month
       ORDER BY r.month
       LIMIT 12
     `;
