@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-  import { Users, AlertTriangle, DollarSign } from "lucide-react";
+  import { Users, AlertTriangle, DollarSign, RefreshCw, Settings, LogOut, BarChart3 } from "lucide-react";
   import BigQuerySummaryCards from "@/components/dashboard/bigquery-summary-cards";
   import { useDashboardAnalytics } from "@/hooks/use-ri";
 
@@ -21,6 +21,8 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<"weekly" | "monthly">("weekly");
   const [accounts, setAccounts] = useState<AccountData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshCountdown, setRefreshCountdown] = useState(45);
 
   // Add the professional analytics hook
   const { data: analytics, isLoading: analyticsLoading } = useDashboardAnalytics();
@@ -44,18 +46,72 @@ export default function Dashboard() {
     fetchAccounts(tab);
   };
 
+  // Auto-refresh countdown effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshCountdown((prev) => {
+        if (prev <= 1) {
+          setRefreshing(true);
+          fetchAccounts(activeTab);
+          setTimeout(() => setRefreshing(false), 2000);
+          return 45; // Reset countdown
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
   useEffect(() => {
     fetchAccounts("weekly");
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          ChurnGuard 
-        </h1>
-        <p className="text-gray-600">Restaurant churn risk monitoring</p>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header matching 2.0 design */}
+      <header className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between">
+          {/* Left side - Logo and title */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
+                <BarChart3 className="h-5 w-5 text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">ChurnGuard</h1>
+            </div>
+            
+            {/* Refresh indicator matching 2.0 */}
+            <div className="flex items-center space-x-2 text-sm">
+              <RefreshCw className={`h-4 w-4 text-blue-600 ${refreshing ? 'animate-spin' : ''}`} />
+              <span className="text-blue-600">
+                {refreshing ? 'Refreshing latest data...' : `Refreshing latest data... ~${refreshCountdown}s`}
+              </span>
+            </div>
+          </div>
+
+          {/* Right side - Navigation */}
+          <div className="flex items-center space-x-6">
+            <nav className="flex items-center space-x-6">
+              <button className="flex items-center space-x-2 text-blue-600 font-medium">
+                <BarChart3 className="h-4 w-4" />
+                <span>Dashboard</span>
+              </button>
+              <button className="flex items-center space-x-2 text-gray-600 hover:text-gray-900">
+                <Settings className="h-4 w-4" />
+                <span>Settings</span>
+              </button>
+              <button className="flex items-center space-x-2 text-gray-600 hover:text-gray-900">
+                <LogOut className="h-4 w-4" />
+                <span>Logout</span>
+              </button>
+            </nav>
+          </div>
+        </div>
       </header>
+
+      {/* Main content */}
+      <div className="p-6">
 
       {/* Professional Summary Cards */}
       <BigQuerySummaryCards analytics={analytics || null} />
@@ -188,6 +244,7 @@ export default function Dashboard() {
         {!loading && accounts.length === 0 && (
           <p className="text-gray-500">No {activeTab} data available</p>
         )}
+      </div>
       </div>
     </div>
   );
