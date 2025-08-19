@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
   import { BarChart3, Settings, LogOut } from "lucide-react";
   import { Button } from "@/components/ui/button";
   import BigQuerySummaryCards from "@/components/dashboard/bigquery-summary-cards";
