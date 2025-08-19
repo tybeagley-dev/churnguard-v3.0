@@ -209,14 +209,14 @@ var BigQueryDataService = class {
           
           -- Current week metrics
           COALESCE(w.total_spend, 0) as total_spend,
-          COALESCE(w.total_texts_delivered, 0) as total_texts_delivered,
-          COALESCE(w.coupons_redeemed, 0) as coupons_redeemed,
-          COALESCE(w.active_subs_cnt, 0) as active_subs_cnt,
+          COALESCE(t.total_texts_delivered, 0) as total_texts_delivered,
+          0 as coupons_redeemed, -- Not available in current schema
+          0 as active_subs_cnt, -- Not available in current schema
           
           -- Risk indicators
           CASE 
-            WHEN w.total_spend < 100 AND w.coupons_redeemed < 5 THEN 'high'
-            WHEN w.total_spend < 200 OR w.coupons_redeemed < 10 THEN 'medium'
+            WHEN w.total_spend < 100 THEN 'high'
+            WHEN w.total_spend < 500 THEN 'medium'
             ELSE 'low'
           END as risk_level,
           
@@ -231,14 +231,21 @@ var BigQueryDataService = class {
           -- Get current week aggregated revenue data
           SELECT 
             account_id,
-            SUM(total) as total_spend,
-            0 as total_texts_delivered,
-            0 as coupons_redeemed,
-            0 as active_subs_cnt
+            SUM(total) as total_spend
           FROM dbt_models.total_revenue_by_account_and_date 
           WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
           GROUP BY account_id
         ) w ON w.account_id = a.id
+        LEFT JOIN (
+          -- Get current week text data
+          SELECT 
+            account_id,
+            COUNT(*) as total_texts_delivered
+          FROM dbt_models.all_texts 
+          WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+            AND is_billable = true
+          GROUP BY account_id
+        ) t ON t.account_id = a.id
         
         WHERE a.launchedat IS NOT NULL
           AND a.status IN ('LAUNCHED', 'PAUSED')
@@ -281,29 +288,36 @@ var BigQueryDataService = class {
   // Get historical performance data for dashboard charts
   async getHistoricalPerformance() {
     const query = `
-      WITH monthly_data AS (
+      WITH monthly_revenue AS (
         SELECT 
           FORMAT_DATE('%Y-%m', DATE_TRUNC(date, MONTH)) as month,
           FORMAT_DATE('%B %Y', DATE_TRUNC(date, MONTH)) as monthLabel,
           SUM(total) as spendAdjusted,
-          COUNT(DISTINCT account_id) as totalAccounts,
-          0 as totalRedemptions,
-          0 as totalSubscribers,
-          0 as totalTextsSent
+          COUNT(DISTINCT account_id) as totalAccounts
         FROM dbt_models.total_revenue_by_account_and_date
         WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
         GROUP BY 1, 2
+      ),
+      monthly_texts AS (
+        SELECT 
+          FORMAT_DATE('%Y-%m', DATE_TRUNC(created_at, MONTH)) as month,
+          COUNT(*) as totalTextsSent
+        FROM dbt_models.all_texts
+        WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 * 30 DAY)
+          AND is_billable = true
+        GROUP BY 1
       )
       SELECT 
-        month,
-        monthLabel,
-        ROUND(spendAdjusted / 1000000, 1) as spendAdjusted,
-        totalAccounts,
-        totalRedemptions,
-        totalSubscribers,
-        totalTextsSent
-      FROM monthly_data
-      ORDER BY month
+        r.month,
+        r.monthLabel,
+        ROUND(r.spendAdjusted / 1000000, 1) as spendAdjusted,
+        r.totalAccounts,
+        0 as totalRedemptions,
+        0 as totalSubscribers,
+        COALESCE(t.totalTextsSent / 1000000, 0) as totalTextsSent
+      FROM monthly_revenue r
+      LEFT JOIN monthly_texts t ON r.month = t.month
+      ORDER BY r.month
       LIMIT 12
     `;
     return this.executeQuery(query);
