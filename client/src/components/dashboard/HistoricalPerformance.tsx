@@ -20,23 +20,18 @@ interface MetricToggle {
 }
 
 const HistoricalPerformance = () => {
-  // Demo mode: Use mock data instead of API calls to prevent reload loops
-  const historicalData = [
-    { month: 'Jan 2024', spendAdjusted: 2.8, totalAccounts: 145, totalRedemptions: 89, totalSubscribers: 12.4, totalTextsSent: 45 },
-    { month: 'Feb 2024', spendAdjusted: 3.1, totalAccounts: 152, totalRedemptions: 94, totalSubscribers: 13.1, totalTextsSent: 48 },
-    { month: 'Mar 2024', spendAdjusted: 2.9, totalAccounts: 148, totalRedemptions: 87, totalSubscribers: 12.8, totalTextsSent: 44 },
-    { month: 'Apr 2024', spendAdjusted: 3.4, totalAccounts: 159, totalRedemptions: 102, totalSubscribers: 14.2, totalTextsSent: 52 },
-    { month: 'May 2024', spendAdjusted: 3.2, totalAccounts: 156, totalRedemptions: 98, totalSubscribers: 13.7, totalTextsSent: 49 },
-    { month: 'Jun 2024', spendAdjusted: 3.6, totalAccounts: 163, totalRedemptions: 108, totalSubscribers: 15.1, totalTextsSent: 55 },
-    { month: 'Jul 2024', spendAdjusted: 3.8, totalAccounts: 167, totalRedemptions: 112, totalSubscribers: 15.8, totalTextsSent: 58 },
-    { month: 'Aug 2024', spendAdjusted: 3.5, totalAccounts: 161, totalRedemptions: 105, totalSubscribers: 14.9, totalTextsSent: 54 },
-    { month: 'Sep 2024', spendAdjusted: 3.9, totalAccounts: 171, totalRedemptions: 118, totalSubscribers: 16.2, totalTextsSent: 61 },
-    { month: 'Oct 2024', spendAdjusted: 4.1, totalAccounts: 175, totalRedemptions: 125, totalSubscribers: 17.1, totalTextsSent: 64 },
-    { month: 'Nov 2024', spendAdjusted: 3.7, totalAccounts: 165, totalRedemptions: 115, totalSubscribers: 15.6, totalTextsSent: 57 },
-    { month: 'Dec 2024', spendAdjusted: 4.3, totalAccounts: 182, totalRedemptions: 135, totalSubscribers: 18.4, totalTextsSent: 68 }
-  ];
-  const isLoading = false;
-  const error = null;
+  // Production mode: Fetch real historical performance data
+  const { data: historicalData = [], isLoading, error } = useQuery({
+    queryKey: ['historical-performance'],
+    queryFn: () => 
+      fetch('/api/historical-performance')
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch historical performance');
+          return res.json();
+        }),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
 
   const [metrics, setMetrics] = useState<MetricToggle[]>([
     { key: 'spendAdjusted', label: 'Spend Adjusted', color: '#8b5cf6', enabled: true },
@@ -66,7 +61,7 @@ const HistoricalPerformance = () => {
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-6">Historical Performance</h2>
-        <p className="text-gray-600 text-sm">Performance Tracking Across Primary Metrics | Rolling 12 months (Demo Mode)</p>
+        <p className="text-gray-600 text-sm">Performance Tracking Across Primary Metrics | Rolling 12 months</p>
       </div>
 
       {/* Metric Selection Toggles - Matching 2.0 checkboxes */}

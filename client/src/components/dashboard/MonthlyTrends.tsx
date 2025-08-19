@@ -13,23 +13,18 @@ interface MonthlyTrendsData {
 const MonthlyTrends = () => {
   const [activeView, setActiveView] = useState<'weekly' | 'monthly'>('weekly');
 
-  // Demo mode: Use mock data instead of API calls to prevent reload loops
-  const monthlyData = [
-    { month: 'Jan', highRisk: 23, mediumRisk: 45, lowRisk: 77, total: 145 },
-    { month: 'Feb', highRisk: 19, mediumRisk: 48, lowRisk: 85, total: 152 },
-    { month: 'Mar', highRisk: 26, mediumRisk: 42, lowRisk: 80, total: 148 },
-    { month: 'Apr', highRisk: 21, mediumRisk: 52, lowRisk: 86, total: 159 },
-    { month: 'May', highRisk: 18, mediumRisk: 49, lowRisk: 89, total: 156 },
-    { month: 'Jun', highRisk: 24, mediumRisk: 55, lowRisk: 84, total: 163 },
-    { month: 'Jul', highRisk: 22, mediumRisk: 58, lowRisk: 87, total: 167 },
-    { month: 'Aug', highRisk: 27, mediumRisk: 46, lowRisk: 88, total: 161 },
-    { month: 'Sep', highRisk: 20, mediumRisk: 61, lowRisk: 90, total: 171 },
-    { month: 'Oct', highRisk: 25, mediumRisk: 63, lowRisk: 87, total: 175 },
-    { month: 'Nov', highRisk: 23, mediumRisk: 57, lowRisk: 85, total: 165 },
-    { month: 'Dec', highRisk: 19, mediumRisk: 68, lowRisk: 95, total: 182 }
-  ];
-  const isLoading = false;
-  const error = null;
+  // Production mode: Fetch real monthly trends data
+  const { data: monthlyData = [], isLoading, error } = useQuery({
+    queryKey: ['monthly-trends'],
+    queryFn: () => 
+      fetch('/api/monthly-trends')
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch monthly trends');
+          return res.json();
+        }),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
 
   const formatTooltipValue = (value: number, name: string) => {
     const labels: { [key: string]: string } = {
@@ -44,7 +39,7 @@ const MonthlyTrends = () => {
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-6">Monthly Trends</h2>
-        <p className="text-gray-600 text-sm">Total Accounts by Risk Level | Rolling 12 months (Demo Mode)</p>
+        <p className="text-gray-600 text-sm">Total Accounts by Risk Level | Rolling 12 months</p>
       </div>
 
       {/* View Toggle Buttons */}
