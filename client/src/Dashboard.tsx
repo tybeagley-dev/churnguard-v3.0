@@ -32,8 +32,22 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshCountdown, setRefreshCountdown] = useState(45);
 
-  // Mock analytics data for now
-  const analytics = null;
+  // Calculate analytics from real account data
+  const analytics = useMemo(() => {
+    if (accounts.length === 0) return null;
+    
+    const totalAccounts = accounts.length;
+    const highRiskCount = accounts.filter(acc => acc.risk_level === 'high').length;
+    const totalRevenue = accounts.reduce((sum, acc) => sum + (acc.total_spend || 0), 0);
+    
+    return {
+      totalAccounts,
+      highRiskCount,
+      totalRevenue,
+      mediumRiskCount: accounts.filter(acc => acc.risk_level === 'medium').length,
+      lowRiskCount: accounts.filter(acc => acc.risk_level === 'low').length
+    };
+  }, [accounts]);
 
   const fetchAccounts = async (period: "weekly" | "monthly") => {
     setLoading(true);
